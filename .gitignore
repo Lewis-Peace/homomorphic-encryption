@@ -30,3 +30,8 @@
 *.exe
 *.out
 *.app
+
+# Notes and libraries
+
+Libraries/
+Obsidian/
