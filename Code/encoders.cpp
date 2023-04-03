@@ -2,10 +2,12 @@
 #include <NTL/ZZ_p.h>
 #include <NTL/ZZX.h>
 #include <NTL/ZZ_pX.h>
+#include <NTL/ZZXFactoring.h>
 #include <NTL/vector.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <tuple>
+#include <NTL/RR.h>
 #include <random>
 #include <gsl/gsl_randist.h>
 #include <gsl/gsl_rng.h>
@@ -37,9 +39,23 @@ namespace randomness {
         } while (sample < 0 || sample > B);
         return sample;
     }
+
+    ZZ getNumber(ZZ from, ZZ to) {
+        ZZ_pPush push(abs(from) + abs(to) + 1);
+        ZZ_p s;
+        NTL::random(s);
+        return conv<ZZ>(s) + from;
+    }
     
-    ZZ_pX randomPolynomial(int length) {
-        ZZ_pX r;
+    /**
+     * @brief Returns a poylnomial with all the coefficients equal to
+     * a random number obtained from the discrete gaussian distribution
+     * 
+     * @param length 
+     * @return ZZX 
+     */
+    ZZX randomPolynomial(int length) {
+        ZZX r;
         int coeff = getNumber();
         r.SetLength(length);
         for (long i = 0; i < length; i++) {
@@ -48,12 +64,34 @@ namespace randomness {
         return r;
     }
 
+    /**
+     * @brief Returns a polynomial with random coeficients bound to the limit
+     * of the arguments from and to
+     * 
+     * @param from 
+     * @param to 
+     * @param length 
+     * @return ZZX 
+     */
+    ZZX randomPolynomial(ZZ from, ZZ to, int length) {
+        ZZX r;
+        r.SetLength(length);
+        for (long i = 0; i < length; i++) {
+            r[i] = getNumber(from, to);
+        }
+        return r;
+    }
+
+    ZZX randomPolynomial(int from, int to, int length) {
+        return randomness::randomPolynomial(conv<ZZ>(from), conv<ZZ>(to), length);
+    }
+
     void clear() {
         gsl_rng_free(r);
     }
 }
 
-namespace logging {
+namespace tools {
     string logPoly(ZZX poly) {
         string output = "(";
         int deg = NTL::deg(poly);
@@ -72,43 +110,57 @@ namespace logging {
     string logPoly(ZZ_pX poly) {
         return logPoly(conv<ZZX>(poly));
     }
+
+    void resizePolynomialsCoeff(ZZ from, ZZ to, ZZX* polynomial) {
+        ZZX temp = conv<ZZX>(conv<ZZ_pX>(*polynomial));
+        for (long i = 0; i <= deg(*polynomial); i++) {
+            (*polynomial)[i] = temp[i] + from;
+        }
+        temp.kill();
+    }
 }
 
-using namespace logging;
+using namespace tools;
 
 class FanVercScheme {
     
     public:
         int n, b, w, l;
 
-        ZZ_pX sk; // Secret key of the class
-        ZZ_pX irreduciblePolynomial;
-        ZZ_pX delta;
+        ZZX sk; // Secret key of the class
+        ZZX irreduciblePolynomial;
+        ZZX delta;
+        ZZ from;
+        ZZ to;
         ZZ q; // Modulus in the ciphertext space
         ZZ t; // Modulus in the plaintext space
-        tuple<ZZ_pX, ZZ_pX> pk; // Public key tuple of the class
-        Vec<tuple<ZZ_pX, ZZ_pX>> evk;
+        tuple<ZZX, ZZX> pk; // Public key tuple of the class
+        Vec<tuple<ZZX, ZZX>> evk;
 
         /**
          * @brief Construct a new Fan-Vercauteren Scheme object initializing the modulo, the secret key, the public key
          * and the evaluation keys.
          */
-        FanVercScheme(int n, int b, int q, int w = 2) {
+        FanVercScheme(int n, int b, ZZ q, int w = 2) {
             randomness::setSeed();
-            printf("Setting n as %i and b as %i\n", n, b);
+            this->from = -(q - 1) / 2;
+            this->to = (q - 1) / 2;
             this->n = n; this->b = b; this->w = w; this->q = q; this->t = t; this->l = floor(log(this->q) / log(this->w));
             ZZ_p::init(this->q);
             
+            printf("Setting n as %i and b as %i and q as %i\n", n, b, conv<int>(this->q));
+            
             // Calculating ∆b
-            double delta_multiplicative = -(conv<double>(this->q) / (pow(this->b, this->n) + 1));
+            RR delta_multiplicative = -(conv<RR>(this->q) / conv<RR>(power(conv<ZZ>(this->b), this->n) + 1));
             this->delta.SetLength(this->n);
             for (int i = 0; i < this->n; i++) {
-                SetCoeff(this->delta, i, conv<long>(round(delta_multiplicative * pow(this->b, this->n - (i + 1)))));
+                this->delta[i] = conv<ZZ>(round(delta_multiplicative * pow(this->b, this->n - (i + 1))));
             }
             
-            irreduciblePolynomial.SetLength(n);
-            SetCoeff(irreduciblePolynomial, 0);
-            SetCoeff(irreduciblePolynomial, n);
+            this->irreduciblePolynomial.SetLength(n + 1);
+            this->irreduciblePolynomial[0] = 1;
+            this->irreduciblePolynomial[n] = 1;
+
             secretKeyGen();
             publicKeyGen();
             evaluationKeyGen();
@@ -123,7 +175,7 @@ class FanVercScheme {
          * @param denominator Denominator of the fraction
          * @return ZZX The polynomial
          */
-        ZZ_pX fractionalEncoder (int numerator, int denominator, int sign) {
+        ZZX fractionalEncoder (int numerator, int denominator) {
             ZZ tempModulo = power((ZZ) this->b, this->n) + 1;
             printf("fraction %i/%i\n", numerator, denominator);
             ZZ_pPush push(tempModulo);
@@ -133,7 +185,7 @@ class FanVercScheme {
                 cout << "inverse of " << denominator << " = " << x << " in modulo " << tempModulo;
                 x = x * numerator;
                 cout << " - Frac to int = " << x << "\n";
-                return FanVercScheme::polyConversion(x, sign);
+                return FanVercScheme::polyConversion(x);
             } catch(const std::exception& e) {
                 printf("Error: No inverse for the number %i in modulo ", denominator);
                 cout << this->q << "\n";
@@ -142,11 +194,10 @@ class FanVercScheme {
         }
 
         // TODO Check if encrypts correctly
-        tuple<ZZ_pX, ZZ_pX> encrypt(int numerator, int denominator, int sign) {
-            ZZ_pX message = fractionalEncoder(numerator, denominator, sign);
-            ZZ_pX u = random_ZZ_pX(this->n);
-            ZZ_pX e0, e1;
-            ZZ_pX c0, c1, pk0, pk1;
+        tuple<ZZX, ZZX> encrypt(int numerator, int denominator) {
+            ZZX message = fractionalEncoder(numerator, denominator);
+            ZZX u = randomness::randomPolynomial(-1, 1, this->n);
+            ZZX e0, e1, c0, c1, pk0, pk1;
             tie(pk0, pk1) = this->pk;
             e0 = randomness::randomPolynomial(this->n);
             e1 = randomness::randomPolynomial(this->n);
@@ -155,41 +206,39 @@ class FanVercScheme {
             cout << "e1 = " << logPoly(e1) << "\n";
             cout << "delta = " << logPoly(this->delta) << "\n";
             
-            ZZ_pX steps1 = (message * this->delta);
-            ZZ_pX steps2 = (pk0 * u);
-            printf("%s %s + %s %s + %s\n", logPoly(message).c_str(), logPoly(this->delta).c_str(), logPoly(u).c_str(), logPoly(pk0).c_str(), logPoly(e0).c_str());
-            c0 = reduce(steps1 + steps2 + e0);
-            c1 = reduce(pk1 * u) + e1;
+            ZZX steps1 = MulMod(message, this->delta, this->irreduciblePolynomial);
+            resizePolynomialsCoeff(&steps1);
+            ZZX steps2 = MulMod(pk0, u, this->irreduciblePolynomial);
+            resizePolynomialsCoeff(&steps2);
+            c0 = steps1 + steps2 + e0;
+            c1 = MulMod(pk1, u, this->irreduciblePolynomial);
+            resizePolynomialsCoeff(&c0);
+            resizePolynomialsCoeff(&c1);
+            c1 += e1;
+            resizePolynomialsCoeff(&c1);
             cout << "c0 = " << logPoly(c0) << "\n";
             cout << "c1 = " << logPoly(c1) << "\n";
             return make_tuple(c0, c1);
         }
 
         // TODO Fix decryption function
-        ZZ_pX decrypt(tuple<ZZ_pX, ZZ_pX> ct) {
-            ZZ_pX c0, c1, M;
-            ZZX temp, tempo;
-            M.SetLength(4);
-            tie(c0, c1) = ct;
+        ZZX decrypt(tuple<ZZX, ZZX> ct) {
+            ZZX c0, c1, M;
+            ZZX temp;
             temp.SetLength(2);
-            printf("b = %i q = %i\n", this->b, conv<int>(this->q));
-            SetCoeff(temp, 0, -b);
-            SetCoeff(temp, 1);
-            ZZ_pX step = reduce(c1 * this->sk);
-            cout << "step " << logPoly(step) << "\n";
-            cout << "temp " << logPoly(temp) << "\n";
-            cout << "c0 + step " << logPoly(c0 + step) << "\n";
-            M = (c0 + step);
-            tempo = conv<ZZX>(M) * temp;
+            temp[0] = -b;
+            temp[1] = 1;
+            tie(c0, c1) = ct;
+            M = MulMod(c1, this->sk, this->irreduciblePolynomial);
+            resizePolynomialsCoeff(&M);
+            M += c0;
+            resizePolynomialsCoeff(&M);
+            M = MulMod(M, temp, this->irreduciblePolynomial);
             cout << "M before " << logPoly(M) << "\n";
-            cout << "tempo " << logPoly(tempo) << "\n";
-            double messageCoefficent;
             for(int i = 0; i <= deg(M); i++) {
-                messageCoefficent = conv<double>(conv<ZZ>(coeff(M, i))) / conv<double>(this->q);
-                printf("%f ", messageCoefficent);
-                SetCoeff(M, i, round(messageCoefficent));
+                M[i] = conv<ZZ>(round(conv<RR>(M[i]) / conv<RR>(this->q)));
             }
-            printf("\n");
+            resizePolynomialsCoeff(&M);
             cout << "M = " << M << "\n";
             return M;
         }
@@ -214,7 +263,7 @@ class FanVercScheme {
          * @param value The integer to convert
          * @return The polynomial of type ZZX
          */
-        static ZZ_pX polyConversion(ZZ_p value, int sign) {
+        static ZZX polyConversion(ZZ_p value) {
             ZZ temp = conv<ZZ>(value);
             int polyLength = 0;
             while (temp != 0) {
@@ -222,15 +271,15 @@ class FanVercScheme {
                 polyLength++;
             }
             temp = conv<ZZ>(value);
-            ZZ_pX f;
+            ZZX f;
             f.SetLength(polyLength);
             for (long i = 0; i < polyLength; i++) {
-                SetCoeff(f, i, (long)(conv<int>((temp >> i) & 1)));
+                f[i] = (temp >> i) & 1;
             }
             cout << "encoding = " << logPoly(f) << "\n";
             cout << "encoding = " << f << "\n";
             printf("Conversion completed...\n\n");
-            return f * sign;
+            return f;
         }
 
         /**
@@ -238,7 +287,7 @@ class FanVercScheme {
          * 
          */
         void secretKeyGen() {
-            this->sk = random_ZZ_pX(this->n);
+            this->sk = randomness::randomPolynomial(this->from, this->to, this->n);
             cout << "sk = " << logPoly(sk) << "\n";
             printf("Private key generated....\n\n");
         }
@@ -249,12 +298,13 @@ class FanVercScheme {
          * @param sk The secret key required to generate the pubblic key
          */
         void publicKeyGen() {
-            ZZ_pX pk1 = random_ZZ_pX(this->n), pk0;
-            ZZ_pX e = randomness::randomPolynomial(this->n);
+            ZZX pk1 = randomness::randomPolynomial(this->from, this->to, this->n), pk0;
+            ZZX e = randomness::randomPolynomial(this->n);
 
             cout << "e = " << logPoly(e) << "\n";
             cout << "pk1 = " << logPoly(pk1) << "\n";
-            pk0 = -(reduce(pk1 * this->sk) + e);
+            pk0 = -(MulMod(pk1, this->sk, this->irreduciblePolynomial) + e);
+            resizePolynomialsCoeff(&pk0);
             cout << "pk0 = " << logPoly(pk0) << "\n";
 
             this->pk = make_tuple(pk0, pk1);
@@ -263,16 +313,15 @@ class FanVercScheme {
         
         
         void evaluationKeyGen() {
-            Vec<tuple<ZZ_pX, ZZ_pX>> pairs;
+            Vec<tuple<ZZX, ZZX>> pairs;
             pairs.SetLength(l);
             int w = 2;
             for (int i = 0; i < this->l; i++) {
-                ZZ_pX x = random_ZZ_pX(this->n), y;
-                ZZ_pX s, e;
+                ZZX x = randomness::randomPolynomial(this->from, this->to, this->n), y;
+                ZZX s, e;
                 s = randomness::randomPolynomial(this->n);
                 e = randomness::randomPolynomial(this->n);
-                y = -((x * this->sk) + e) + pow(w, i) * (s * s);
-                reduce(&y);
+                y = -(MulMod(x, this->sk, this->irreduciblePolynomial) + e) + pow(w, i) * (s * s);
                 
                 // cout << "i = " << i << "\n";
                 // cout << "y = " << y << "\n";
@@ -283,7 +332,11 @@ class FanVercScheme {
             printf("Evaluation keys generated....\n\n");
         }
 
+        void resizePolynomialsCoeff(ZZX* polynomial) {
+            tools::resizePolynomialsCoeff(this->from, this->to, polynomial);
+        }
 
+/*
         void reduce(ZZ_pX* polynomial) {
             while (deg(*polynomial) > n) {
                 *polynomial %= this->irreduciblePolynomial;
@@ -295,24 +348,7 @@ class FanVercScheme {
                 polynomial %= this->irreduciblePolynomial;
             }
             return polynomial;
-        }
-
-        void setFixedKeys() {
-            int skcoef[5] = {3,7,15,0,0};
-            int pk0coef[5] = {14,11,10,18,0};
-            int pk1coef[5] = {6,6,6,15,0};
-            ZZ_pX pk0, pk1;
-            for (int i = 0; i < this->n; i++) {
-                SetCoeff(this->sk, i, skcoef[i]);
-                SetCoeff(pk0, i, pk0coef[i]);
-                SetCoeff(pk1, i, pk1coef[i]);
-            }
-            this->pk = make_tuple(pk0, pk1);
-            cout << "sk = " << this->sk << "\n";
-            tie(pk0, pk1) = this->pk;
-            cout << "pk0 = " << pk0 << "\n";
-            cout << "pk1 = " << pk1 << "\n";
-        }
+        }*/
 
         // ZZ mul(ZZ ct0, ZZ ct1) {
         // }
@@ -323,12 +359,18 @@ class FanVercScheme {
     if (argc >= 3) {
         int numerator = atoi(argv[1]), denominator = atoi(argv[2]);
         printf("Insert numerator and denominator: ");
-        int q = 19, n = 4, b = 2;
+        ZZ q = power2_ZZ(10); int n = 4, b = 2;
         FanVercScheme f(n, b, q);
-        f.decrypt(f.encrypt(numerator, denominator, -1));
+        f.decrypt(f.encrypt(numerator, denominator));
         randomness::clear();
     } else {
         printf("Too few arguments\n");
+        ZZX x, y;
+        cin >> x;
+        cin >> y;
+        cout << x * y << "\n";
+        cout << x[0] << "\n";
+        cout << x[1] << "\n";
     }
 
     return 0;
