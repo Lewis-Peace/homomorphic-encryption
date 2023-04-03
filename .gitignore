@@ -36,3 +36,5 @@
 Libraries/
 Obsidian/
 .vscode/
+*.txt
+.vscode/settings.json
