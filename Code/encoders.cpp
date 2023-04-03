@@ -93,7 +93,7 @@ class FanVercScheme {
          * @brief Construct a new Fan-Vercauteren Scheme object initializing the modulo, the secret key, the public key
          * and the evaluation keys.
          */
-        FanVercScheme(int n, int b, int q, int t, int w = 2) {
+        FanVercScheme(int n, int b, int q, int w = 2) {
             randomness::setSeed();
             printf("Setting n as %i and b as %i\n", n, b);
             this->n = n; this->b = b; this->w = w; this->q = q; this->t = t; this->l = floor(log(this->q) / log(this->w));
@@ -167,15 +167,22 @@ class FanVercScheme {
 
         // TODO Fix decryption function
         ZZ_pX decrypt(tuple<ZZ_pX, ZZ_pX> ct) {
-            ZZ_pX c0, c1, M, temp;
+            ZZ_pX c0, c1, M;
+            ZZX temp, tempo;
+            M.SetLength(4);
             tie(c0, c1) = ct;
             temp.SetLength(2);
             printf("b = %i q = %i\n", this->b, conv<int>(this->q));
             SetCoeff(temp, 0, -b);
             SetCoeff(temp, 1);
             ZZ_pX step = reduce(c1 * this->sk);
-            M = reduce((c0 + step) * temp);
+            cout << "step " << logPoly(step) << "\n";
+            cout << "temp " << logPoly(temp) << "\n";
+            cout << "c0 + step " << logPoly(c0 + step) << "\n";
+            M = (c0 + step);
+            tempo = conv<ZZX>(M) * temp;
             cout << "M before " << logPoly(M) << "\n";
+            cout << "tempo " << logPoly(tempo) << "\n";
             double messageCoefficent;
             for(int i = 0; i <= deg(M); i++) {
                 messageCoefficent = conv<double>(conv<ZZ>(coeff(M, i))) / conv<double>(this->q);
@@ -222,7 +229,7 @@ class FanVercScheme {
             }
             cout << "encoding = " << logPoly(f) << "\n";
             cout << "encoding = " << f << "\n";
-            printf("Conversion completed...\n");
+            printf("Conversion completed...\n\n");
             return f * sign;
         }
 
@@ -233,7 +240,7 @@ class FanVercScheme {
         void secretKeyGen() {
             this->sk = random_ZZ_pX(this->n);
             cout << "sk = " << logPoly(sk) << "\n";
-            printf("Private key generated....\n");
+            printf("Private key generated....\n\n");
         }
 
         /**
@@ -247,11 +254,11 @@ class FanVercScheme {
 
             cout << "e = " << logPoly(e) << "\n";
             cout << "pk1 = " << logPoly(pk1) << "\n";
-            pk0 = reduce(-((pk1 * this->sk) + e));
+            pk0 = -(reduce(pk1 * this->sk) + e);
             cout << "pk0 = " << logPoly(pk0) << "\n";
 
             this->pk = make_tuple(pk0, pk1);
-            printf("Public keys generated....\n");
+            printf("Public keys generated....\n\n");
         }
         
         
@@ -273,7 +280,7 @@ class FanVercScheme {
                 pairs[i] = make_tuple(y, x);
             }
             this->evk = pairs;
-            printf("Evaluation keys generated....\n");
+            printf("Evaluation keys generated....\n\n");
         }
 
 
@@ -317,7 +324,7 @@ class FanVercScheme {
         int numerator = atoi(argv[1]), denominator = atoi(argv[2]);
         printf("Insert numerator and denominator: ");
         int q = 19, n = 4, b = 2;
-        FanVercScheme f(n, b, q, (q / 8) - 1);
+        FanVercScheme f(n, b, q);
         f.decrypt(f.encrypt(numerator, denominator, -1));
         randomness::clear();
     } else {
