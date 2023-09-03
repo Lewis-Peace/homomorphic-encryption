@@ -12,10 +12,12 @@
 #include <gsl/gsl_randist.h>
 #include <gsl/gsl_rng.h>
 #include <time.h>
+#include <sstream>
 #include "globals.h"
 #include "tools.cpp"
 
 using namespace tools;
+using namespace std;
 
 namespace fractionalEncoder
 {
@@ -46,6 +48,12 @@ namespace fractionalEncoder
             NTL::ZZ g = NTL::GCD(this->numerator, this->denominator);
             this->numerator = numerator / g;
             this->denominator = denominator / g;
+        }
+
+        string ToString() {
+            stringstream buffer;
+            buffer << this->numerator << "/" << this->denominator;
+            return buffer.str();
         }
     };
 
